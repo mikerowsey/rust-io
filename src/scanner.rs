@@ -75,6 +75,13 @@ impl Scanner {
             .expect("invalid floating-point value")
     }
 
+    /// Reads the next whitespace-delimited token as UTF-8.
+    #[must_use]
+    #[inline]
+    pub fn next_str(&mut self) -> &str {
+        std::str::from_utf8(self.next_bytes()).expect("invalid UTF-8")
+    }
+
     /// Reads the next whitespace-delimited token as raw bytes.
     #[must_use]
     #[inline]
@@ -163,6 +170,15 @@ mod tests {
         assert_eq!(input.next_f64(), 2.14);
         assert_eq!(input.next_f64(), -2.5);
         assert_eq!(input.next_f64(), 1000.0);
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parses_strings() {
+        let mut input = Scanner::from_bytes(b"hello world");
+
+        assert_eq!(input.next_str(), "hello");
+        assert_eq!(input.next_str(), "world");
         assert!(input.is_empty());
     }
 

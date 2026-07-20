@@ -5,22 +5,22 @@ use std::{
 
 /// Fast buffered output.
 ///
-/// Values are written through the [`Writable`] trait into an internal byte
-/// buffer. The completed buffer can be extracted with [`Output::into_bytes`]
+/// Values are pushed through the [`Writable`] trait into an internal byte
+/// buffer. The completed buffer can be extracted with [`OutputBuf::into_bytes`]
 /// or written to any [`std::io::Write`] implementation with
-/// [`Output::write_to`].
+/// [`OutputBuf::write_to`].
 #[must_use]
-pub struct Output {
+pub struct OutputBuffer {
     buf: Vec<u8>,
 }
 
-/// A value that can write itself into an [`Output`] buffer.
+/// A value that can write itself into an [`OutputBuf`] buffer.
 pub trait Writable {
     /// Writes `self` into `out`.
-    fn write_to(self, out: &mut Output);
+    fn write_to(self, out: &mut OutputBuffer);
 }
 
-impl Output {
+impl OutputBuffer {
     /// Creates an empty output buffer with a default capacity of 1 MiB.
     pub fn new() -> Self {
         Self::with_capacity(1 << 20)
@@ -33,22 +33,34 @@ impl Output {
         }
     }
 
-    /// Writes a value.
+    /// Pushes a value.
     #[inline]
-    pub fn write<T: Writable>(&mut self, value: T) {
+    pub fn push<T: Writable>(&mut self, value: T) {
         value.write_to(self);
     }
 
-    /// Writes a value followed by a newline.
+    /// Pushes a value followed by a newline.
     #[inline]
-    pub fn writeln<T: Writable>(&mut self, value: T) {
-        self.write(value);
-        self.endl();
+    pub fn push_line<T: Writable>(&mut self, value: T) {
+        self.push(value);
+        self.newline();
     }
 
-    /// Appends a newline.
+    /// Pushes raw bytes.
     #[inline]
-    pub fn endl(&mut self) {
+    pub fn push_bytes(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+    }
+
+    /// Pushes UTF-8 text.
+    #[inline]
+    pub fn push_str(&mut self, value: &str) {
+        self.push_bytes(value.as_bytes());
+    }
+
+    /// Pushes a newline.
+    #[inline]
+    pub fn newline(&mut self) {
         self.write_byte(b'\n');
     }
 
@@ -70,11 +82,6 @@ impl Output {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
-    }
-
-    #[inline]
-    fn write_bytes(&mut self, bytes: &[u8]) {
-        self.buf.extend_from_slice(bytes);
     }
 
     #[inline]
@@ -111,62 +118,69 @@ impl Output {
 
     #[inline]
     fn write_f64(&mut self, value: f64) {
-        self.write_bytes(value.to_string().as_bytes());
+        self.push_str(&value.to_string());
     }
 }
 
-impl Default for Output {
+impl Default for OutputBuffer {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl fmt::Write for Output {
+impl fmt::Write for OutputBuffer {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.write_bytes(s.as_bytes());
+        self.push_bytes(s.as_bytes());
         Ok(())
     }
 }
 
 impl Writable for u64 {
     #[inline]
-    fn write_to(self, out: &mut Output) {
+    fn write_to(self, out: &mut OutputBuffer) {
         out.write_u64(self);
     }
 }
 
 impl Writable for i64 {
     #[inline]
-    fn write_to(self, out: &mut Output) {
+    fn write_to(self, out: &mut OutputBuffer) {
         out.write_i64(self);
     }
 }
 
 impl Writable for f64 {
     #[inline]
-    fn write_to(self, out: &mut Output) {
+    fn write_to(self, out: &mut OutputBuffer) {
         out.write_f64(self);
     }
 }
 
 impl Writable for bool {
     #[inline]
-    fn write_to(self, out: &mut Output) {
-        out.write_bytes(if self { b"true" } else { b"false" });
+    fn write_to(self, out: &mut OutputBuffer) {
+        out.push_bytes(if self { b"true" } else { b"false" });
     }
 }
 
 impl Writable for &[u8] {
     #[inline]
-    fn write_to(self, out: &mut Output) {
-        out.write_bytes(self);
+    fn write_to(self, out: &mut OutputBuffer) {
+        out.push_bytes(self);
     }
 }
 
 impl<const N: usize> Writable for &[u8; N] {
     #[inline]
-    fn write_to(self, out: &mut Output) {
-        out.write_bytes(self);
+    fn write_to(self, out: &mut OutputBuffer) {
+        out.push_bytes(self);
+    }
+}
+
+impl Writable for &str {
+    #[inline]
+    fn write_to(self, out: &mut OutputBuffer) {
+        out.push_str(self);
     }
 }
 
@@ -175,77 +189,77 @@ mod tests {
     use super::*;
     use std::fmt::Write as _;
 
-    fn output_string(out: Output) -> String {
+    fn output_string(out: OutputBuffer) -> String {
         String::from_utf8(out.into_bytes()).unwrap()
     }
 
     #[test]
     fn new_output_is_empty() {
-        assert!(Output::new().is_empty());
+        assert!(OutputBuffer::new().is_empty());
     }
 
     #[test]
     fn default_output_is_empty() {
-        assert!(Output::default().is_empty());
+        assert!(OutputBuffer::default().is_empty());
     }
 
     #[test]
-    fn writes_u64() {
-        let mut out = Output::with_capacity(0);
-        out.write(0_u64);
+    fn pushes_u64() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.push(0_u64);
         assert_eq!(output_string(out), "0");
     }
 
     #[test]
-    fn writes_i64() {
-        let mut out = Output::with_capacity(0);
-        out.write(42_i64);
+    fn pushes_i64() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.push(42_i64);
         assert_eq!(output_string(out), "42");
     }
 
     #[test]
-    fn writes_f64() {
-        let mut out = Output::with_capacity(0);
-        out.write(1.5_f64);
+    fn pushes_f64() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.push(1.5_f64);
         assert_eq!(output_string(out), "1.5");
     }
 
     #[test]
-    fn writes_bytes() {
-        let mut out = Output::with_capacity(0);
-        out.write(b"hello world");
+    fn pushes_bytes() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.push_bytes(b"hello world");
         assert_eq!(output_string(out), "hello world");
     }
 
     #[test]
-    fn writes_bool() {
-        let mut out = Output::with_capacity(0);
-        out.write(true);
+    fn pushes_bool() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.push(true);
         assert_eq!(output_string(out), "true");
     }
 
     #[test]
-    fn writeln_appends_newline() {
-        let mut out = Output::with_capacity(0);
+    fn push_line_appends_newline() {
+        let mut out = OutputBuffer::with_capacity(0);
 
-        out.writeln(b"hello");
+        out.push_line(b"hello");
 
         assert_eq!(output_string(out), "hello\n");
     }
 
     #[test]
-    fn endl_appends_newline() {
-        let mut out = Output::with_capacity(0);
+    fn newline_appends_newline() {
+        let mut out = OutputBuffer::with_capacity(0);
 
-        out.endl();
+        out.newline();
 
         assert_eq!(out.into_bytes(), b"\n");
     }
 
     #[test]
     fn write_to_writes_into_any_io_writer() {
-        let mut out = Output::with_capacity(0);
-        out.write(b"hello");
+        let mut out = OutputBuffer::with_capacity(0);
+        out.push(b"hello");
 
         let mut dest = Vec::new();
         out.write_to(&mut dest).unwrap();
@@ -255,10 +269,17 @@ mod tests {
 
     #[test]
     fn implements_fmt_write() {
-        let mut out = Output::with_capacity(0);
+        let mut out = OutputBuffer::with_capacity(0);
 
         write!(&mut out, "{} + {} = {}", 2, 3, 5).unwrap();
 
         assert_eq!(output_string(out), "2 + 3 = 5");
+    }
+
+    #[test]
+    fn pushes_str() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.push_str("hello");
+        assert_eq!(output_string(out), "hello");
     }
 }
