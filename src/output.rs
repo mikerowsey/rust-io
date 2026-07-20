@@ -3,11 +3,12 @@ use std::{
     io::{self, Write},
 };
 
-/// Buffered output that accumulates bytes in memory.
+/// Fast buffered output.
 ///
-/// Values are written through the [`Writable`] trait. The completed buffer can
-/// be extracted with [`Output::into_bytes`] or written to any
-/// [`std::io::Write`] implementation with [`Output::write_to`].
+/// Values are written through the [`Writable`] trait into an internal byte
+/// buffer. The completed buffer can be extracted with [`Output::into_bytes`]
+/// or written to any [`std::io::Write`] implementation with
+/// [`Output::write_to`].
 #[must_use]
 pub struct Output {
     buf: Vec<u8>,
@@ -32,7 +33,7 @@ impl Output {
         }
     }
 
-    /// Writes a value into the buffer.
+    /// Writes a value.
     #[inline]
     pub fn write<T: Writable>(&mut self, value: T) {
         value.write_to(self);
@@ -45,59 +46,13 @@ impl Output {
         self.endl();
     }
 
-    /// Writes iterator items separated by spaces.
-    #[inline]
-    pub fn write_iter<I, T>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = T>,
-        T: Writable,
-    {
-        self.write_iter_delimited(iter, b' ');
-    }
-
-    /// Writes iterator items separated by `delimiter`.
-    #[inline]
-    pub fn write_iter_delimited<I, T>(&mut self, iter: I, delimiter: u8)
-    where
-        I: IntoIterator<Item = T>,
-        T: Writable,
-    {
-        let mut iter = iter.into_iter();
-
-        if let Some(first) = iter.next() {
-            self.write(first);
-
-            for value in iter {
-                self.write_byte(delimiter);
-                self.write(value);
-            }
-        }
-    }
-
-    /// Writes iterator items separated by spaces, followed by a newline.
-    #[inline]
-    pub fn writeln_iter<I, T>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = T>,
-        T: Writable,
-    {
-        self.write_iter(iter);
-        self.endl();
-    }
-
-    /// Writes slice items separated by spaces.
-    #[inline]
-    pub fn write_slice<T: Writable + Copy>(&mut self, slice: &[T]) {
-        self.write_iter(slice.iter().copied());
-    }
-
-    /// Appends a newline byte.
+    /// Appends a newline.
     #[inline]
     pub fn endl(&mut self) {
         self.write_byte(b'\n');
     }
 
-    /// Writes the entire buffered output to `writer`.
+    /// Writes the buffered output to `writer`.
     ///
     /// # Errors
     ///
@@ -106,24 +61,12 @@ impl Output {
         writer.write_all(&self.buf)
     }
 
-    /// Consumes the output and returns its underlying byte buffer.
+    /// Consumes the output and returns the underlying byte buffer.
     pub fn into_bytes(self) -> Vec<u8> {
         self.buf
     }
 
-    /// Returns the number of bytes currently buffered.
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.buf.len()
-    }
-
-    /// Returns the current capacity of the internal byte buffer.
-    #[inline]
-    pub fn capacity(&self) -> usize {
-        self.buf.capacity()
-    }
-
-    /// Returns `true` when the buffer contains no bytes.
+    /// Returns `true` if the output buffer is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
@@ -166,6 +109,7 @@ impl Output {
         }
     }
 
+    #[inline]
     fn write_f64(&mut self, value: f64) {
         self.write_bytes(value.to_string().as_bytes());
     }
@@ -184,47 +128,17 @@ impl fmt::Write for Output {
     }
 }
 
-impl Writable for bool {
+impl Writable for u64 {
     #[inline]
     fn write_to(self, out: &mut Output) {
-        out.write_bytes(if self { b"true" } else { b"false" });
+        out.write_u64(self);
     }
 }
 
-macro_rules! impl_writable_unsigned {
-    ($($ty:ty),+ $(,)?) => {
-        $(
-            impl Writable for $ty {
-                #[inline]
-                fn write_to(self, out: &mut Output) {
-                    out.write_u64(self as u64);
-                }
-            }
-        )+
-    };
-}
-
-impl_writable_unsigned!(u8, u16, u32, u64, usize);
-
-macro_rules! impl_writable_signed {
-    ($($ty:ty),+ $(,)?) => {
-        $(
-            impl Writable for $ty {
-                #[inline]
-                fn write_to(self, out: &mut Output) {
-                    out.write_i64(self as i64);
-                }
-            }
-        )+
-    };
-}
-
-impl_writable_signed!(i8, i16, i32, i64, isize);
-
-impl Writable for f32 {
+impl Writable for i64 {
     #[inline]
     fn write_to(self, out: &mut Output) {
-        out.write_f64(self as f64);
+        out.write_i64(self);
     }
 }
 
@@ -235,24 +149,10 @@ impl Writable for f64 {
     }
 }
 
-impl Writable for &str {
+impl Writable for bool {
     #[inline]
     fn write_to(self, out: &mut Output) {
-        out.write_bytes(self.as_bytes());
-    }
-}
-
-impl Writable for String {
-    #[inline]
-    fn write_to(self, out: &mut Output) {
-        out.write_bytes(self.as_bytes());
-    }
-}
-
-impl Writable for &String {
-    #[inline]
-    fn write_to(self, out: &mut Output) {
-        out.write_bytes(self.as_bytes());
+        out.write_bytes(if self { b"true" } else { b"false" });
     }
 }
 
@@ -263,17 +163,17 @@ impl Writable for &[u8] {
     }
 }
 
-impl Writable for char {
+impl<const N: usize> Writable for &[u8; N] {
     #[inline]
     fn write_to(self, out: &mut Output) {
-        let mut buf = [0; 4];
-        out.write_bytes(self.encode_utf8(&mut buf).as_bytes());
+        out.write_bytes(self);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
     fn output_string(out: Output) -> String {
         String::from_utf8(out.into_bytes()).unwrap()
@@ -281,123 +181,54 @@ mod tests {
 
     #[test]
     fn new_output_is_empty() {
-        let out = Output::new();
-
-        assert!(out.is_empty());
-        assert_eq!(out.len(), 0);
+        assert!(Output::new().is_empty());
     }
 
     #[test]
     fn default_output_is_empty() {
-        let out = Output::default();
-
-        assert!(out.is_empty());
+        assert!(Output::default().is_empty());
     }
 
     #[test]
-    fn with_capacity_reserves_requested_capacity() {
-        let out = Output::with_capacity(32);
-
-        assert!(out.capacity() >= 32);
-    }
-
-    #[test]
-    fn writes_unsigned_integers() {
+    fn writes_u64() {
         let mut out = Output::with_capacity(0);
-
-        out.write(0_u8);
-        out.write(' ');
-        out.write(u16::MAX);
-        out.write(' ');
-        out.write(u32::MAX);
-        out.write(' ');
-        out.write(u64::MAX);
-        out.write(' ');
-        out.write(usize::MAX);
-
-        assert_eq!(
-            output_string(out),
-            format!("0 {} {} {} {}", u16::MAX, u32::MAX, u64::MAX, usize::MAX)
-        );
+        out.write(0_u64);
+        assert_eq!(output_string(out), "0");
     }
 
     #[test]
-    fn writes_signed_integers() {
+    fn writes_i64() {
         let mut out = Output::with_capacity(0);
-
-        out.write(i8::MIN);
-        out.write(' ');
-        out.write(i16::MIN);
-        out.write(' ');
-        out.write(i32::MIN);
-        out.write(' ');
-        out.write(i64::MIN);
-        out.write(' ');
-        out.write(isize::MIN);
-
-        assert_eq!(
-            output_string(out),
-            format!(
-                "{} {} {} {} {}",
-                i8::MIN,
-                i16::MIN,
-                i32::MIN,
-                i64::MIN,
-                isize::MIN
-            )
-        );
+        out.write(42_i64);
+        assert_eq!(output_string(out), "42");
     }
 
     #[test]
-    fn writes_floats() {
+    fn writes_f64() {
         let mut out = Output::with_capacity(0);
-
-        out.write(1.5_f32);
-        out.write(' ');
-        out.write(-2.25_f64);
-
-        assert_eq!(output_string(out), "1.5 -2.25");
+        out.write(1.5_f64);
+        assert_eq!(output_string(out), "1.5");
     }
 
     #[test]
-    fn writes_text_and_characters() {
+    fn writes_bytes() {
         let mut out = Output::with_capacity(0);
-        let owned = String::from("world");
-
-        out.write("hello");
-        out.write(' ');
-        out.write(&owned);
-        out.write(' ');
-        out.write('λ');
-
-        assert_eq!(output_string(out), "hello world λ");
+        out.write(b"hello world");
+        assert_eq!(output_string(out), "hello world");
     }
 
     #[test]
-    fn writes_owned_string() {
+    fn writes_bool() {
         let mut out = Output::with_capacity(0);
-
-        out.write(String::from("owned"));
-
-        assert_eq!(output_string(out), "owned");
-    }
-
-    #[test]
-    fn writes_boolean_values() {
-        let mut out = Output::with_capacity(0);
-
         out.write(true);
-        out.write(' ');
-        out.write(false);
-
-        assert_eq!(output_string(out), "true false");
+        assert_eq!(output_string(out), "true");
     }
 
     #[test]
     fn writeln_appends_newline() {
         let mut out = Output::with_capacity(0);
 
-        out.writeln("hello");
+        out.writeln(b"hello");
 
         assert_eq!(output_string(out), "hello\n");
     }
@@ -412,101 +243,18 @@ mod tests {
     }
 
     #[test]
-    fn write_iter_uses_spaces() {
-        let mut out = Output::with_capacity(0);
-
-        out.write_iter([1, 2, 3]);
-
-        assert_eq!(output_string(out), "1 2 3");
-    }
-
-    #[test]
-    fn write_iter_delimited_uses_requested_delimiter() {
-        let mut out = Output::with_capacity(0);
-
-        out.write_iter_delimited([1, 2, 3], b',');
-
-        assert_eq!(output_string(out), "1,2,3");
-    }
-
-    #[test]
-    fn empty_iterator_writes_nothing() {
-        let mut out = Output::with_capacity(0);
-
-        out.write_iter(std::iter::empty::<i32>());
-
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn writeln_iter_appends_newline() {
-        let mut out = Output::with_capacity(0);
-
-        out.writeln_iter([1, 2, 3]);
-
-        assert_eq!(output_string(out), "1 2 3\n");
-    }
-
-    #[test]
-    fn write_slice_writes_copied_values() {
-        let mut out = Output::with_capacity(0);
-        let values = [4, 5, 6];
-
-        out.write_slice(&values);
-
-        assert_eq!(output_string(out), "4 5 6");
-    }
-
-    #[test]
-    fn writes_raw_bytes() {
-        let mut out = Output::with_capacity(0);
-
-        out.write(&b"abc"[..]);
-
-        assert_eq!(out.into_bytes(), b"abc");
-    }
-
-    #[test]
-    fn writes_references_to_primitives() {
-        let mut out = Output::with_capacity(0);
-        let value = 42_u64;
-        let flag = true;
-        let ch = 'x';
-
-        out.write(value);
-        out.write(' ');
-        out.write(flag);
-        out.write(' ');
-        out.write(ch);
-
-        assert_eq!(output_string(out), "42 true x");
-    }
-
-    #[test]
-    fn len_tracks_buffered_bytes() {
-        let mut out = Output::with_capacity(0);
-
-        out.write("hello");
-
-        assert_eq!(out.len(), 5);
-        assert!(!out.is_empty());
-    }
-
-    #[test]
     fn write_to_writes_into_any_io_writer() {
         let mut out = Output::with_capacity(0);
-        let mut destination = Vec::new();
+        out.write(b"hello");
 
-        out.write("hello");
-        out.write_to(&mut destination).unwrap();
+        let mut dest = Vec::new();
+        out.write_to(&mut dest).unwrap();
 
-        assert_eq!(destination, b"hello");
+        assert_eq!(dest, b"hello");
     }
 
     #[test]
     fn implements_fmt_write() {
-        use std::fmt::Write as _;
-
         let mut out = Output::with_capacity(0);
 
         write!(&mut out, "{} + {} = {}", 2, 3, 5).unwrap();
