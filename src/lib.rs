@@ -1,14 +1,7 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Fast and ergonomic input/output utilities for Rust.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod output;
+pub mod scanner;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use output::{Output, Writable};
+pub use scanner::Scanner;
