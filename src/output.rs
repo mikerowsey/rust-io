@@ -39,13 +39,6 @@ impl OutputBuffer {
         value.write_to(self);
     }
 
-    /// Pushes a value followed by a newline.
-    #[inline]
-    pub fn push_line<T: Writable>(&mut self, value: T) {
-        self.push(value);
-        self.newline();
-    }
-
     /// Pushes raw bytes.
     #[inline]
     pub fn push_bytes(&mut self, bytes: &[u8]) {
@@ -56,12 +49,6 @@ impl OutputBuffer {
     #[inline]
     pub fn push_str(&mut self, value: &str) {
         self.push_bytes(value.as_bytes());
-    }
-
-    /// Pushes a newline.
-    #[inline]
-    pub fn newline(&mut self) {
-        self.write_byte(b'\n');
     }
 
     /// Writes the buffered output to `writer`.
@@ -236,24 +223,6 @@ mod tests {
         let mut out = OutputBuffer::with_capacity(0);
         out.push(true);
         assert_eq!(output_string(out), "true");
-    }
-
-    #[test]
-    fn push_line_appends_newline() {
-        let mut out = OutputBuffer::with_capacity(0);
-
-        out.push_line(b"hello");
-
-        assert_eq!(output_string(out), "hello\n");
-    }
-
-    #[test]
-    fn newline_appends_newline() {
-        let mut out = OutputBuffer::with_capacity(0);
-
-        out.newline();
-
-        assert_eq!(out.into_bytes(), b"\n");
     }
 
     #[test]
