@@ -43,6 +43,13 @@ impl OutputBuffer {
         value.write_to(self);
     }
 
+    /// Pushes a value followed by a newline.
+    #[inline]
+    pub fn push_line<T: Writable>(&mut self, value: T) {
+        self.push(value);
+        self.endl();
+    }
+
     /// Pushes raw bytes.
     #[inline]
     pub fn push_bytes(&mut self, bytes: &[u8]) {
@@ -414,6 +421,14 @@ mod tests {
         out.endl();
         out.push_str("world");
         assert_eq!(output_string(out), "hello\nworld");
+    }
+
+    #[test]
+    fn push_line_appends_newline() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.push_line("hello");
+        out.push_line("world");
+        assert_eq!(output_string(out), "hello\nworld\n");
     }
 
     #[test]
