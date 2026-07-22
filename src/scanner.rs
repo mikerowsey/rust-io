@@ -3,13 +3,32 @@ use std::io::{self, Read};
 /// Fast scanner for whitespace-delimited input.
 ///
 /// The scanner reads the entire input into memory and efficiently parses
-/// primitive values and byte slices.
+/// whitespace-delimited tokens into typed values.
+///
+/// # Example
+///
+/// ```
+/// use rust_io::Scanner;
+///
+/// let mut scan = Scanner::from_bytes(b"42 hello");
+/// let n: u64 = scan.next();
+/// let s: String = scan.next();
+///
+/// assert_eq!(n, 42);
+/// assert_eq!(s, "hello");
+/// ```
 ///
 /// Designed for competitive programming and other token-based input.
 #[must_use]
 pub struct Scanner {
     buf: Vec<u8>,
     idx: usize,
+}
+
+/// A value that can be read from a [`Scanner`].
+pub trait Readable: Sized {
+    /// Reads `Self` from `scan`.
+    fn read(scan: &mut Scanner) -> Self;
 }
 
 impl Scanner {
@@ -38,94 +57,11 @@ impl Scanner {
         }
     }
 
-    /// Reads the next unsigned 64-bit integer.
+    /// Reads the next whitespace-delimited token as a typed value.
     #[must_use]
     #[inline]
-    pub fn next_u64(&mut self) -> u64 {
-        Self::parse_unsigned::<u64>(self.next_bytes())
-    }
-
-    /// Reads the next unsigned 32-bit integer.
-    #[must_use]
-    #[inline]
-    pub fn next_u32(&mut self) -> u32 {
-        Self::parse_unsigned::<u32>(self.next_bytes())
-    }
-
-    /// Reads the next unsigned 128-bit integer.
-    #[must_use]
-    #[inline]
-    pub fn next_u128(&mut self) -> u128 {
-        Self::parse_unsigned::<u128>(self.next_bytes())
-    }
-
-    /// Reads the next pointer-sized unsigned integer.
-    #[must_use]
-    #[inline]
-    pub fn next_usize(&mut self) -> usize {
-        Self::parse_unsigned::<usize>(self.next_bytes())
-    }
-
-    /// Reads the next signed 64-bit integer.
-    #[must_use]
-    #[inline]
-    pub fn next_i64(&mut self) -> i64 {
-        Self::parse_signed::<i64>(self.next_bytes())
-    }
-
-    /// Reads the next signed 32-bit integer.
-    #[must_use]
-    #[inline]
-    pub fn next_i32(&mut self) -> i32 {
-        Self::parse_signed::<i32>(self.next_bytes())
-    }
-
-    /// Reads the next signed 128-bit integer.
-    #[must_use]
-    #[inline]
-    pub fn next_i128(&mut self) -> i128 {
-        Self::parse_signed::<i128>(self.next_bytes())
-    }
-
-    /// Reads the next pointer-sized signed integer.
-    #[must_use]
-    #[inline]
-    pub fn next_isize(&mut self) -> isize {
-        Self::parse_signed::<isize>(self.next_bytes())
-    }
-
-    /// Reads the next 64-bit floating-point value.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the next token is not a valid `f64`.
-    #[must_use]
-    #[inline]
-    pub fn next_f64(&mut self) -> f64 {
-        std::str::from_utf8(self.next_bytes())
-            .expect("invalid UTF-8")
-            .parse()
-            .expect("invalid floating-point value")
-    }
-
-    /// Reads the next whitespace-delimited token as UTF-8.
-    #[must_use]
-    #[inline]
-    pub fn next_str(&mut self) -> &str {
-        std::str::from_utf8(self.next_bytes()).expect("invalid UTF-8")
-    }
-
-    /// Reads the next boolean value.
-    ///
-    /// Accepts `true` / `false`, and also `1` / `0`.
-    #[must_use]
-    #[inline]
-    pub fn next_bool(&mut self) -> bool {
-        match self.next_bytes() {
-            b"true" | b"1" => true,
-            b"false" | b"0" => false,
-            _ => panic!("invalid boolean token"),
-        }
+    pub fn next<T: Readable>(&mut self) -> T {
+        T::read(self)
     }
 
     /// Reads the next whitespace-delimited token as raw bytes.
@@ -223,6 +159,40 @@ impl Scanner {
 
         value
     }
+
+    #[inline]
+    fn parse_f64(token: &[u8]) -> f64 {
+        std::str::from_utf8(token)
+            .expect("invalid UTF-8")
+            .parse()
+            .expect("invalid floating-point value")
+    }
+}
+
+macro_rules! impl_readable_unsigned {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl Readable for $ty {
+                #[inline]
+                fn read(scan: &mut Scanner) -> Self {
+                    Scanner::parse_unsigned::<$ty>(scan.next_bytes())
+                }
+            }
+        )*
+    };
+}
+
+macro_rules! impl_readable_signed {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl Readable for $ty {
+                #[inline]
+                fn read(scan: &mut Scanner) -> Self {
+                    Scanner::parse_signed::<$ty>(scan.next_bytes())
+                }
+            }
+        )*
+    };
 }
 
 trait FromU128: Sized {
@@ -280,6 +250,40 @@ macro_rules! impl_from_i128 {
 
 impl_from_u128!(u32, u64, u128, usize);
 impl_from_i128!(i32, i64, i128, isize);
+impl_readable_unsigned!(u32, u64, u128, usize);
+impl_readable_signed!(i32, i64, i128, isize);
+
+impl Readable for f64 {
+    #[inline]
+    fn read(scan: &mut Scanner) -> Self {
+        Scanner::parse_f64(scan.next_bytes())
+    }
+}
+
+impl Readable for bool {
+    #[inline]
+    fn read(scan: &mut Scanner) -> Self {
+        match scan.next_bytes() {
+            b"true" | b"1" => true,
+            b"false" | b"0" => false,
+            _ => panic!("invalid boolean token"),
+        }
+    }
+}
+
+impl Readable for String {
+    #[inline]
+    fn read(scan: &mut Scanner) -> Self {
+        String::from_utf8(scan.next_bytes().to_vec()).expect("invalid UTF-8")
+    }
+}
+
+impl Readable for Vec<u8> {
+    #[inline]
+    fn read(scan: &mut Scanner) -> Self {
+        scan.next_bytes().to_vec()
+    }
+}
 
 impl Default for Scanner {
     fn default() -> Self {
@@ -296,8 +300,11 @@ mod tests {
     fn from_reader_reads_input() {
         let mut input = Scanner::from_reader(Cursor::new(b"123 abc")).unwrap();
 
-        assert_eq!(input.next_u64(), 123);
-        assert_eq!(input.next_bytes(), b"abc");
+        let n: u64 = input.next();
+        let token: Vec<u8> = input.next();
+
+        assert_eq!(n, 123);
+        assert_eq!(token, b"abc");
         assert!(input.is_empty());
     }
 
@@ -305,8 +312,11 @@ mod tests {
     fn parses_unsigned_integers() {
         let mut input = Scanner::from_bytes(b"42 99");
 
-        assert_eq!(input.next_u64(), 42);
-        assert_eq!(input.next_u64(), 99);
+        let first: u64 = input.next();
+        let second: u64 = input.next();
+
+        assert_eq!(first, 42);
+        assert_eq!(second, 99);
         assert!(input.is_empty());
     }
 
@@ -314,9 +324,13 @@ mod tests {
     fn parses_smaller_unsigned_integers() {
         let mut input = Scanner::from_bytes(b"42 99 123");
 
-        assert_eq!(input.next_u32(), 42);
-        assert_eq!(input.next_usize(), 99);
-        assert_eq!(input.next_u128(), 123);
+        let first: u32 = input.next();
+        let second: usize = input.next();
+        let third: u128 = input.next();
+
+        assert_eq!(first, 42);
+        assert_eq!(second, 99);
+        assert_eq!(third, 123);
         assert!(input.is_empty());
     }
 
@@ -324,9 +338,13 @@ mod tests {
     fn parses_signed_integers() {
         let mut input = Scanner::from_bytes(b"-42 99 -7");
 
-        assert_eq!(input.next_i64(), -42);
-        assert_eq!(input.next_i64(), 99);
-        assert_eq!(input.next_i64(), -7);
+        let first: i64 = input.next();
+        let second: i64 = input.next();
+        let third: i64 = input.next();
+
+        assert_eq!(first, -42);
+        assert_eq!(second, 99);
+        assert_eq!(third, -7);
         assert!(input.is_empty());
     }
 
@@ -334,9 +352,13 @@ mod tests {
     fn parses_smaller_signed_integers() {
         let mut input = Scanner::from_bytes(b"-42 99 -7");
 
-        assert_eq!(input.next_i32(), -42);
-        assert_eq!(input.next_isize(), 99);
-        assert_eq!(input.next_i128(), -7);
+        let first: i32 = input.next();
+        let second: isize = input.next();
+        let third: i128 = input.next();
+
+        assert_eq!(first, -42);
+        assert_eq!(second, 99);
+        assert_eq!(third, -7);
         assert!(input.is_empty());
     }
 
@@ -344,8 +366,8 @@ mod tests {
     fn parses_signed_integer_boundaries() {
         let mut input = Scanner::from_bytes(b"9223372036854775807 -9223372036854775808");
 
-        assert_eq!(input.next_i64(), i64::MAX);
-        assert_eq!(input.next_i64(), i64::MIN);
+        assert_eq!(input.next::<i64>(), i64::MAX);
+        assert_eq!(input.next::<i64>(), i64::MIN);
         assert!(input.is_empty());
     }
 
@@ -353,7 +375,7 @@ mod tests {
     fn parses_unsigned_integer_boundary() {
         let mut input = Scanner::from_bytes(b"18446744073709551615");
 
-        assert_eq!(input.next_u64(), u64::MAX);
+        assert_eq!(input.next::<u64>(), u64::MAX);
         assert!(input.is_empty());
     }
 
@@ -365,9 +387,9 @@ mod tests {
         let input = format!("{u32_max} {usize_max} {u128_max}");
         let mut scanner = Scanner::from_bytes(input.as_bytes());
 
-        assert_eq!(scanner.next_u32(), u32::MAX);
-        assert_eq!(scanner.next_usize(), usize::MAX);
-        assert_eq!(scanner.next_u128(), u128::MAX);
+        assert_eq!(scanner.next::<u32>(), u32::MAX);
+        assert_eq!(scanner.next::<usize>(), usize::MAX);
+        assert_eq!(scanner.next::<u128>(), u128::MAX);
         assert!(scanner.is_empty());
     }
 
@@ -376,7 +398,7 @@ mod tests {
     fn rejects_unsigned_integer_overflow() {
         let mut input = Scanner::from_bytes(b"18446744073709551616");
 
-        let _ = input.next_u64();
+        let _ = input.next::<u64>();
     }
 
     #[test]
@@ -384,7 +406,7 @@ mod tests {
     fn rejects_signed_integer_overflow() {
         let mut input = Scanner::from_bytes(b"-9223372036854775809");
 
-        let _ = input.next_i64();
+        let _ = input.next::<i64>();
     }
 
     #[test]
@@ -392,7 +414,7 @@ mod tests {
     fn rejects_invalid_unsigned_token() {
         let mut input = Scanner::from_bytes(b"abc");
 
-        let _ = input.next_u64();
+        let _ = input.next::<u64>();
     }
 
     #[test]
@@ -400,16 +422,16 @@ mod tests {
     fn rejects_invalid_signed_token() {
         let mut input = Scanner::from_bytes(b"+");
 
-        let _ = input.next_i64();
+        let _ = input.next::<i64>();
     }
 
     #[test]
     fn parses_floats() {
         let mut input = Scanner::from_bytes(b"2.14 -2.5 1e3");
 
-        assert_eq!(input.next_f64(), 2.14);
-        assert_eq!(input.next_f64(), -2.5);
-        assert_eq!(input.next_f64(), 1000.0);
+        assert_eq!(input.next::<f64>(), 2.14);
+        assert_eq!(input.next::<f64>(), -2.5);
+        assert_eq!(input.next::<f64>(), 1000.0);
         assert!(input.is_empty());
     }
 
@@ -417,8 +439,11 @@ mod tests {
     fn parses_strings() {
         let mut input = Scanner::from_bytes(b"hello world");
 
-        assert_eq!(input.next_str(), "hello");
-        assert_eq!(input.next_str(), "world");
+        let first: String = input.next();
+        let second: String = input.next();
+
+        assert_eq!(first, "hello");
+        assert_eq!(second, "world");
         assert!(input.is_empty());
     }
 
@@ -426,10 +451,10 @@ mod tests {
     fn parses_bools() {
         let mut input = Scanner::from_bytes(b"true false 1 0");
 
-        assert!(input.next_bool());
-        assert!(!input.next_bool());
-        assert!(input.next_bool());
-        assert!(!input.next_bool());
+        assert!(input.next::<bool>());
+        assert!(!input.next::<bool>());
+        assert!(input.next::<bool>());
+        assert!(!input.next::<bool>());
         assert!(input.is_empty());
     }
 
@@ -437,8 +462,8 @@ mod tests {
     fn parses_bytes() {
         let mut input = Scanner::from_bytes(b"hello world");
 
-        assert_eq!(input.next_bytes(), b"hello");
-        assert_eq!(input.next_bytes(), b"world");
+        assert_eq!(input.next::<Vec<u8>>(), b"hello");
+        assert_eq!(input.next::<Vec<u8>>(), b"world");
         assert!(input.is_empty());
     }
 
