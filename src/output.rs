@@ -68,7 +68,6 @@ impl OutputBuffer {
     /// Clears the current delimiter.
     pub fn clear_delimiter(&mut self) {
         self.delimiter = None;
-        self.needs_delimiter = false;
     }
 
     /// Pushes a newline.
@@ -105,6 +104,15 @@ impl OutputBuffer {
 
     #[inline]
     fn write_u64(&mut self, mut value: u64) {
+        self.write_delimiter();
+        self.write_u64_digits(&mut value);
+        self.needs_delimiter = true;
+    }
+
+    #[inline]
+    fn write_u64_digits(&mut self, value: &mut u64) {
+        let mut value = *value;
+
         if value == 0 {
             self.write_byte(b'0');
             return;
@@ -122,6 +130,14 @@ impl OutputBuffer {
 
     #[inline]
     fn write_u128(&mut self, mut value: u128) {
+        self.write_delimiter();
+        self.write_u128_digits(&mut value);
+        self.needs_delimiter = true;
+    }
+
+    #[inline]
+    fn write_u128_digits(&mut self, value: &mut u128) {
+        let mut value = *value;
         if value == 0 {
             self.write_byte(b'0');
             return;
@@ -139,17 +155,25 @@ impl OutputBuffer {
 
     #[inline]
     fn write_i128(&mut self, value: i128) {
+        self.write_delimiter();
+
         if value < 0 {
             self.write_byte(b'-');
-            self.write_u128(value.unsigned_abs());
+            let mut magnitude = value.unsigned_abs();
+            self.write_u128_digits(&mut magnitude);
         } else {
-            self.write_u128(value as u128);
+            let mut magnitude = value as u128;
+            self.write_u128_digits(&mut magnitude);
         }
+
+        self.needs_delimiter = true;
     }
 
     #[inline]
     fn write_f64(&mut self, value: f64) {
-        self.push_str(&value.to_string());
+        self.write_delimiter();
+        self.append_bytes(value.to_string().as_bytes());
+        self.needs_delimiter = true;
     }
 
     #[inline]
@@ -246,28 +270,36 @@ impl Writable for f64 {
 impl Writable for bool {
     #[inline]
     fn write_to(self, out: &mut OutputBuffer) {
-        out.push_bytes(if self { b"true" } else { b"false" });
+        out.write_delimiter();
+        out.append_bytes(if self { b"true" } else { b"false" });
+        out.needs_delimiter = true;
     }
 }
 
 impl Writable for &[u8] {
     #[inline]
     fn write_to(self, out: &mut OutputBuffer) {
-        out.push_bytes(self);
+        out.write_delimiter();
+        out.append_bytes(self);
+        out.needs_delimiter = true;
     }
 }
 
 impl<const N: usize> Writable for &[u8; N] {
     #[inline]
     fn write_to(self, out: &mut OutputBuffer) {
-        out.push_bytes(self);
+        out.write_delimiter();
+        out.append_bytes(self);
+        out.needs_delimiter = true;
     }
 }
 
 impl Writable for &str {
     #[inline]
     fn write_to(self, out: &mut OutputBuffer) {
-        out.push_str(self);
+        out.write_delimiter();
+        out.append_bytes(self.as_bytes());
+        out.needs_delimiter = true;
     }
 }
 
@@ -395,6 +427,16 @@ mod tests {
     }
 
     #[test]
+    fn writes_delimiter_between_numeric_tokens() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.set_delimiter(", ");
+        out.push(1_u64);
+        out.push(2_i64);
+        out.push(3_u128);
+        assert_eq!(output_string(out), "1, 2, 3");
+    }
+
+    #[test]
     fn delimiter_resets_after_endl() {
         let mut out = OutputBuffer::with_capacity(0);
         out.set_delimiter(" ");
@@ -403,5 +445,18 @@ mod tests {
         out.push("real");
         out.push("token");
         assert_eq!(output_string(out), "last\nreal token");
+    }
+
+    #[test]
+    fn clear_delimiter_preserves_token_state() {
+        let mut out = OutputBuffer::with_capacity(0);
+        out.set_delimiter(", ");
+        out.push("a");
+        out.push("b");
+        out.clear_delimiter();
+        out.push("c");
+        out.set_delimiter(", ");
+        out.push("d");
+        assert_eq!(output_string(out), "a, bc, d");
     }
 }
